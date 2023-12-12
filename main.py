@@ -4,8 +4,7 @@ import pandas as pd
 import nltk
 from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
-from sklearn.metrics.pairwise import cosine_similarity
-import numpy as np
+
 nltk.download("punkt")
 
 
@@ -15,62 +14,39 @@ def read_text_file(file_path):
         return file.read()
 
 
-def calculate_similarity(tfidf_matrix, query_vector):
-    print('entered value',tfidf_matrix)
-    print('entered value',query_vector)
-    # numpy_array = np.array( tfidf_matrix.toarray())
-    query_vector = np.array(query_vector)
-    
-    # if tfidf_matrix.shape[1] == query_vector.shape[0]:
-    #     similarity = calculate_similarity(numpy_array, query_vector)
-    #     print('\nSimilarity:\n', similarity)
-    # else:
-    #     print('Incompatible shapes for cosine similarity calculation.')
-    """
-    Calculate cosine similarity between the query vector and each document in the TF-IDF matrix.
-
-    Parameters:
-    - tfidf_matrix: The TF-IDF matrix (scipy.sparse.csr_matrix).
-    - query_vector: The TF-IDF vector representation of the query (numpy array).
-
-    Returns:
-    - similarities: A list of cosine similarities between the query and each document.
-    """
-    # Calculate cosine similarity
-    similarities = cosine_similarity(tfidf_matrix, query_vector.reshape(1, -1))
-
-    # Flatten the similarities array
-    similarities = similarities.flatten()
-
-    return similarities
-
 def tokenize_and_remove_stopwords(text, stop_words):
-    """Tokenize text and remove stopwords. and stemming  """
+    """Tokenize text and remove stopwords."""
     tokens = word_tokenize(text)
-    tokens= [word for word in tokens if word not in stop_words]
-    #Stemming
+    tokens = [word for word in tokens if word not in stop_words]
+    # Stemming
     from nltk.stem import PorterStemmer
     ps = PorterStemmer()
     tokens = [ps.stem(word) for word in tokens]
     return tokens
 
 
-
 def build_positional_index(documents):
     """Build a positional index from a list of documents."""
     positional_index = {}
     document_number = 1
+    {'antoni':[2,{1:[0],2:[0,5]}]}
+    ##term frequency =1
 
     for document in documents:
         for positional, term in enumerate(document):
+            #to check if the term is already present in the positional index
             if term in positional_index:
+                #increment the term frequency
                 positional_index[term][0] += 1
-
+                #check if the document is already present in the positional index
                 if document_number in positional_index[term][1]:
+                    #append the positional index
                     positional_index[term][1][document_number].append(positional)
                 else:
+                    #add the positional index
                     positional_index[term][1][document_number] = [positional]
             else:
+                #add the term to the positional index
                 positional_index[term] = [1, {document_number: [positional]}]
 
         document_number += 1
@@ -89,7 +65,7 @@ def get_term_frequency(document, all_words):
 def get_weighted_term_frequency(x):
     """Calculate weighted term frequency."""
     if x > 0:
-        return int(math.log(x) + 1)
+        return (math.log(x) + 1)
     return 0
 
 
@@ -109,7 +85,7 @@ def calculate_normalized_term_freq_idf(term_freq_inve_doc_freq, document_length)
     normalized_term_freq_idf = pd.DataFrame()
     for column in term_freq_inve_doc_freq.columns:
         normalized_term_freq_idf[column] = term_freq_inve_doc_freq[column].apply(
-            lambda x: x / document_length[column ].values[0] if document_length[column ].values[
+            lambda x: x / document_length[column + '_length'].values[0] if document_length[column + '_length'].values[
                                                                                0] != 0 else 0
         )
     return normalized_term_freq_idf
@@ -118,78 +94,89 @@ def calculate_normalized_term_freq_idf(term_freq_inve_doc_freq, document_length)
 def handle_query(positional_index, normalized_term_freq_idf, tfd, query):
     """Handle a search query."""
     documents_found = query_search(positional_index, query)
+    print(documents_found)
+    query = query.replace("and", "").replace("or", "").replace("not", "")
+
     if not documents_found:
         print('No matching documents found.')
         return
 
     query_df = create_query_dataframe(normalized_term_freq_idf, query)
-
-
     product = calculate_product(normalized_term_freq_idf, query_df)
     query_df['idf'] = tfd['idf'] * query_df['w_tf']
     query_df['tf_idf'] = query_df['w_tf'] * query_df['idf']
     query_df['norm'] = query_df['idf'] / math.sqrt(sum(query_df['idf'].values ** 2))
-
-    ## add sum of query product to dataframe
-    # query_product['sum'] = query_product.sum(axis=1)
-    print('\nQuery\n', query_df.loc[query.split()])
-    # print('\nQuery product\n', query_product.loc[query.split()])
-
     product2 = product.multiply(query_df['norm'], axis=0)
+    product_final = product2[documents_found].loc[query.split()]
+    product_final.loc['sum'] = product_final.sum(axis=0)
     query_length = math.sqrt(sum([x ** 2 for x in query_df['idf'].loc[query.split()]]))
-    print('\nQuery length:\n', query_length)
-    print('\nProduct:\n', product2)
-    scores = calculate_scores(product2, documents_found)
-    final_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-    for doc, score in final_scores:
-        print(f" similarity (q , {doc}) " ,score)
-    print('\nReturned docs:')
-    for doc, score in final_scores:
-        print(doc, end=" ", flush=True)
+    ##merge the two dataframes to get the final result
+    final = pd.concat([query_df.loc[query.split()], product_final], axis=1)
+    ## remove the rows with NaN values with empty string
+    final = final.fillna('')
+    print('\nProduct:\n', final)
+    print('\nQuery', query_df.loc[query.split()])
 
-def query_search_boolean(positional_index, query):
+    print('\nQuery length:\n', query_length)
+
+    scores = calculate_scores(product2, documents_found)
+    final_scores = sorted(scores.items(),)
+    for doc, score in final_scores:
+        print(f" similarity (q , {doc}) ", score)
+    print('\nReturned docs:')
+
+    for doc, score in final_scores:
+        print(doc, end=" ")
+
+
+def query_search(positional_index, query):
     """Search for documents based on boolean queries."""
     terms = query.split()
     stack = []
+    result = []
     operator = None
-
+    print(positional_index)
     for term in terms:
         if term.upper() in ["AND", "OR", "NOT"]:
             operator = term.upper()
         else:
             if term in positional_index.keys():
                 if operator == "NOT":
-                    # Exclude documents containing the term for NOT operation
+
                     stack.append(set(range(1, 11)) - set(positional_index[term][1].keys()))
+                    stack = [set.intersection(*stack)]
                 else:
                     # Add documents containing the term for AND and OR operations
                     stack.append(set(positional_index[term][1].keys()))
+                if operator == "AND":
+                    stack = [set.intersection(*stack)]
 
-    if not stack:
-        return []
+                elif operator == "OR":
+                    stack = [set.union(*stack)]
 
-    # Perform boolean operations
-    if operator == "AND":
-        result = set.intersection(*stack)
-    elif operator == "OR":
-        result = set.union(*stack)
-    else:
-        result = stack[0]
+                else:
+                    #if (len(stack) > 1 and operator is None ):
+                    # result = set.intersection(*stack)
+                    #else:
+                    result = stack[0]
 
+        # Perform boolean operations
+
+
+    if(len(stack)>1):
+        stack = [set.intersection(*stack)]
     # Convert document numbers to strings
-    positions = [f'doc{doc}' for doc in sorted(result)]
+    positions = [f'doc{doc}' for doc in sorted(stack[0])]
     return positions
 
 
-def query_search(positional_index, query):
+def query_search_fun(positional_index, query):
     """Search for documents containing all terms in the query."""
     matching_docs = [[] for _ in range(10)]
-    print(query.split())
     for term in query.split():
-
         if term in positional_index.keys():
             for doc_id in positional_index[term][1].keys():
-                if matching_docs[doc_id - 1]:
+                if matching_docs[doc_id - 1] != []:
                     if matching_docs[doc_id - 1][-1] == positional_index[term][1][doc_id][0] - 1:
                         matching_docs[doc_id - 1].append(positional_index[term][1][doc_id][0])
                 else:
@@ -207,8 +194,6 @@ def create_query_dataframe(normalized_term_freq_idf, query):
     query_df = pd.DataFrame(index=normalized_term_freq_idf.index)
     query_df['tf'] = [1 if x in query.split() else 0 for x in list(normalized_term_freq_idf.index)]
     query_df['w_tf'] = query_df['tf'].apply(lambda x: math.log10(max(1, x)) + 1)
-    ## add last row sum of query
-    query_df.loc['sum'] = query_df.sum(axis=0)
 
     return query_df
 
@@ -228,19 +213,26 @@ def calculate_scores(product, documents_found):
 
 
 def main():
-    stop_words = set(stopwords.words('english')) - {'in', 'to', 'where'}
+
+    stop_words = set(stopwords.words('english')) - set(['in', 'to', 'where', 'or', 'and', 'not', "OR", "AND", "NOT"])
     directory = './data'
     documents = []
 
-    docs= os.listdir(directory)
+    docs = os.listdir(directory)
+    for i in range(len(docs)):
+        docs[i] = docs[i].replace(".txt", "")
+        docs[i] = int(docs[i])
+    docs.sort()
     print(docs)
-    for doc in docs:
-        document_text = read_text_file(doc)
+    for doc_nmuber in range(1, docs.__len__() + 1):
+        # data/1.txt
+        document_text = read_text_file(directory + '/' + str(docs[doc_nmuber - 1]) + '.txt')
         document_tokens = tokenize_and_remove_stopwords(document_text, stop_words)
         documents.append(document_tokens)
-
     positional_index = build_positional_index(documents)
 
+    for term in positional_index.keys():
+        print(term, positional_index[term])
     all_words = [word for doc in documents for word in doc]
 
     term_freq = pd.DataFrame(get_term_frequency(documents[0], all_words).values(),
@@ -264,18 +256,18 @@ def main():
     document_length = pd.DataFrame()
 
     for column in term_freq_inve_doc_freq.columns:
-        # column.replace('doc', '')
-        document_length.loc['length', f'{column}'] = math.sqrt(
+        #equation  length of the document = sqrt(sum of squares of the tf-idf values)
+        document_length.loc['length', f'{column}_length'] = math.sqrt(
             term_freq_inve_doc_freq[column].apply(lambda x: x ** 2).sum())
 
-    print('\nDocument length:\n', document_length.transpose())
+    print('\nDocument length:\n', document_length)
 
     normalized_term_freq_idf = calculate_normalized_term_freq_idf(term_freq_inve_doc_freq, document_length)
     print('\nNormalized tf-idf:\n', normalized_term_freq_idf)
 
     query = input('\nEnter query:\n')
     query = ' '.join(tokenize_and_remove_stopwords(query, stop_words))
-    print(query)
+
     # query=
     handle_query(positional_index, normalized_term_freq_idf, tfd, query)
 
